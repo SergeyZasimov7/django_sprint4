@@ -37,7 +37,7 @@ class Category(PublishedModel):
         verbose_name_plural = 'Категории'
 
     def __str__(self):
-        return f'{self.title} - {self.description[:50]}'
+        return f'{self.title[:50]} - {self.description[:50]}'
 
 
 class Location(PublishedModel):
@@ -48,7 +48,7 @@ class Location(PublishedModel):
         verbose_name_plural = 'Местоположения'
 
     def __str__(self):
-        return self.name
+        return self.name[:50]
 
 
 class Post(PublishedModel):
@@ -91,36 +91,21 @@ class Post(PublishedModel):
         ordering = ('-pub_date',)
 
     def __str__(self):
-        return f'{self.title} - {self.text[:50]}'
+        return f'{self.title[:50]} - {self.text[:50]}'
 
     def get_absolute_url(self):
-        return reverse('blog:post_detail', args=[str(self.id)])
+        return reverse('blog:post_detail', args=[self.id])
 
 
-class Congratulation(models.Model):
-    text = models.TextField('Текст поздравления')
+class Сomment(models.Model):
+    text = models.TextField('Комментарий')
     post = models.ForeignKey(
         Post,
         on_delete=models.CASCADE,
-        related_name='congratulations',
+        related_name='comments',
     )
     created_at = models.DateTimeField(auto_now_add=True)
     author = models.ForeignKey(User, on_delete=models.CASCADE)
 
     class Meta:
         ordering = ('created_at',)
-
-
-class Profile(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE)
-    bio = models.TextField(verbose_name='Биография', blank=True, null=True)
-    avatar = models.ImageField(
-        verbose_name='Аватар', upload_to='avatars/', blank=True, null=True
-    )
-
-    class Meta:
-        verbose_name = 'профиль'
-        verbose_name_plural = 'Профили'
-
-    def __str__(self):
-        return f'Профиль пользователя {self.user.username}'
