@@ -16,16 +16,16 @@ User = get_user_model()
 ENTRIES_PER_PAGE = 10
 
 
-def get_published_posts(posts, include_unpublished_posts=True):
-    visible_posts = posts.annotate(
+def get_published_posts(posts, only_published=True):
+    posts = posts.annotate(
         comment_count=Count('comments')).order_by('-pub_date')
-    if include_unpublished_posts:
-        visible_posts = visible_posts.filter(
+    if only_published:
+        posts = posts.filter(
             pub_date__lte=timezone.now(),
             is_published=True,
             category__is_published=True
         )
-    return visible_posts
+    return posts
 
 
 class PostListView(ListView):
@@ -47,9 +47,7 @@ class PostDetailView(LoginRequiredMixin, DetailView):
 
         if self.request.user != post.author:
             post = get_object_or_404(
-                get_published_posts(
-                    Post.objects, include_unpublished_posts=True
-                ),
+                get_published_posts(Post.objects),
                 pk=post.pk
             )
         return post
@@ -159,9 +157,9 @@ class ProfileView(DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         author = get_object_or_404(User, username=self.kwargs['username'])
-        posts = author.posts.annotate(
-            comment_count=Count('comments')
-        ).order_by('-pub_date')
+        posts = get_published_posts(
+            author.posts, only_published=self.request.user != author
+        )
         context['profile'] = author
         context['page_obj'] = Paginator(
             posts, ENTRIES_PER_PAGE
