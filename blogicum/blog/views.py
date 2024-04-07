@@ -7,6 +7,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.generic import DetailView, ListView, UpdateView, View
+from django.core.paginator import Paginator 
 
 from .forms import CommentForm, PostForm, UserEditForm
 from .models import Category, Сomment, Post
@@ -16,17 +17,16 @@ User = get_user_model()
 ENTRIES_PER_PAGE = 10
 
 
-def get_published_posts(posts, is_author=False):
-    if is_author:
-        return posts.annotate(
-            comment_count=Count('comments')
-        ).order_by('-pub_date')
-    else:
-        return posts.filter(
+def get_published_posts(posts, include_unpublished_posts=False):
+    query_set = posts.annotate(
+        comment_count=Count('comments')).order_by('-pub_date')
+    if not include_unpublished_posts:
+        query_set = query_set.filter(
             pub_date__lte=timezone.now(),
             is_published=True,
             category__is_published=True
-        ).annotate(comment_count=Count('comments')).order_by('-pub_date')
+        )
+    return query_set
 
 
 class PostListView(ListView):
@@ -46,21 +46,19 @@ class PostDetailView(LoginRequiredMixin, DetailView):
     def get_object(self, queryset=None):
         post = super().get_object(queryset)
 
-        if (not get_published_posts(Post.objects.filter(pk=post.pk)).exists()
-                and self.request.user != post.author):
-            get_object_or_404(
-                Post,
-                pk=self.kwargs[self.pk_url_kwarg],
-                author=self.request.user
+        if self.request.user != post.author:
+            post = get_object_or_404(
+                get_published_posts(Post.objects.filter(pk=post.pk))
             )
 
         return post
 
     def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['form'] = CommentForm()
-        context['comments'] = self.object.comments.all()
-        return context
+        return super().get_context_data(
+            **kwargs,
+            form=CommentForm(),
+            comments=self.object.comments.all(),
+        )
 
 
 class CreatePostView(LoginRequiredMixin, View):
@@ -80,8 +78,11 @@ class CreatePostView(LoginRequiredMixin, View):
 
 class EditPostView(LoginRequiredMixin, View):
 
+    def get_post(self, post_id):
+        return get_object_or_404(Post, pk=post_id)
+
     def get(self, request, post_id):
-        post = get_object_or_404(Post, pk=post_id)
+        post = self.get_post(post_id)
         if post.author == request.user:
             return render(request, 'blog/create.html', {
                 'form': PostForm(instance=post)
@@ -90,8 +91,7 @@ class EditPostView(LoginRequiredMixin, View):
             return redirect('blog:index')
 
     def post(self, request, post_id):
-        post = get_object_or_404(Post, pk=post_id)
-
+        post = self.get_post(post_id)
         if post.author != request.user:
             return redirect('blog:post_detail', post_id=post_id)
 
@@ -105,8 +105,11 @@ class EditPostView(LoginRequiredMixin, View):
 
 class DeletePostView(LoginRequiredMixin, View):
 
+    def get_post(self, post_id):
+        return get_object_or_404(Post, pk=post_id)
+
     def get(self, request, post_id):
-        post = get_object_or_404(Post, pk=post_id)
+        post = self.get_post(post_id)
         if post.author == request.user:
             form = PostForm(instance=post)
             return render(request, 'blog/create.html', {
@@ -116,7 +119,7 @@ class DeletePostView(LoginRequiredMixin, View):
             return redirect('blog:index')
 
     def post(self, request, post_id):
-        post = get_object_or_404(Post, pk=post_id)
+        post = self.get_post(post_id)
         if post.author == request.user:
             post.delete()
         return redirect('blog:index')
@@ -140,7 +143,10 @@ class CategoryPostsView(DetailView):
         category = self.get_object()
         posts = get_published_posts(category.posts.all())
         context['category'] = category
-        context['page_obj'] = posts[:self.paginate_by]
+        context['page_obj'] = Paginator(
+            posts, self.paginate_by).get_page(
+            self.request.GET.get('page')
+        )
         return context
 
 
@@ -155,9 +161,15 @@ class ProfileView(DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         author = get_object_or_404(User, username=self.kwargs['username'])
-        posts = get_published_posts(author.posts, is_author=True)
+        if self.request.user == author:
+            posts = author.posts.all()
+        else:
+            posts = get_published_posts(author.posts)
         context['profile'] = author
-        context['page_obj'] = posts[:self.paginate_by]
+        context['page_obj'] = Paginator(
+            posts, self.paginate_by).get_page(
+            self.request.GET.get('page')
+        )
 
         return context
 
@@ -187,8 +199,6 @@ def add_comment(request, post_id):
         comment.author = request.user
         comment.post = post
         comment.save()
-        return redirect('blog:post_detail', post_id=post_id)
-
     return redirect('blog:post_detail', post_id=post_id)
 
 
@@ -196,15 +206,12 @@ def add_comment(request, post_id):
 def edit_comment(request, post_id, comment_id):
     comment = get_object_or_404(Сomment, pk=comment_id)
     if comment.author != request.user:
-        messages.error(request, "Вы не можете редактировать этот комментарий.")
         return redirect('blog:post_detail', post_id=post_id)
 
-    form = CommentForm(instance=comment)
-    if request.method == 'POST':
-        form = CommentForm(request.POST, instance=comment)
-        if form.is_valid():
-            form.save()
-            return redirect('blog:post_detail', post_id=post_id)
+    form = CommentForm(request.POST or None, instance=comment)
+    if form.is_valid():
+        form.save()
+        return redirect('blog:post_detail', post_id=post_id)
 
     return render(request, 'blog/comment.html', {
         'comment': comment, 'form': form
