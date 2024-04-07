@@ -7,7 +7,6 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.generic import DetailView, ListView, UpdateView, View
-from django.core.exceptions import PermissionDenied
 
 from .forms import CommentForm, PostForm, UserEditForm
 from .models import Category, Сomment, Post
@@ -19,7 +18,9 @@ ENTRIES_PER_PAGE = 10
 
 def get_published_posts(posts, is_author=False):
     if is_author:
-        return posts.annotate(comment_count=Count('comments')).order_by('-pub_date')
+        return posts.annotate(
+            comment_count=Count('comments')
+        ).order_by('-pub_date')
     else:
         return posts.filter(
             pub_date__lte=timezone.now(),
