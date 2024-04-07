@@ -16,16 +16,16 @@ User = get_user_model()
 ENTRIES_PER_PAGE = 10
 
 
-def get_published_posts(posts, include_unpublished_posts=False):
-    query_set = posts.annotate(
+def get_published_posts(posts, include_unpublished_posts=True):
+    visible_posts = posts.annotate(
         comment_count=Count('comments')).order_by('-pub_date')
-    if not include_unpublished_posts:
-        query_set = query_set.filter(
+    if include_unpublished_posts:
+        visible_posts = visible_posts.filter(
             pub_date__lte=timezone.now(),
             is_published=True,
             category__is_published=True
         )
-    return query_set
+    return visible_posts
 
 
 class PostListView(ListView):
@@ -47,9 +47,11 @@ class PostDetailView(LoginRequiredMixin, DetailView):
 
         if self.request.user != post.author:
             post = get_object_or_404(
-                get_published_posts(Post.objects.filter(pk=post.pk))
+                get_published_posts(
+                    Post.objects, include_unpublished_posts=True
+                ),
+                pk=post.pk
             )
-
         return post
 
     def get_context_data(self, **kwargs):
@@ -86,8 +88,7 @@ class EditPostView(LoginRequiredMixin, View):
             return render(request, 'blog/create.html', {
                 'form': PostForm(instance=post)
             })
-        else:
-            return redirect('blog:index')
+        return redirect('blog:index')
 
     def post(self, request, post_id):
         post = self.get_post(post_id)
@@ -114,8 +115,7 @@ class DeletePostView(LoginRequiredMixin, View):
             return render(request, 'blog/create.html', {
                 'form': form, 'delete_mode': True
             })
-        else:
-            return redirect('blog:index')
+        return redirect('blog:index')
 
     def post(self, request, post_id):
         post = self.get_post(post_id)
@@ -130,7 +130,6 @@ class CategoryPostsView(DetailView):
     slug_field = 'category_slug'
     slug_url_kwarg = 'category_slug'
     context_object_name = 'category'
-    paginate_by = ENTRIES_PER_PAGE
 
     def get_object(self):
         return get_object_or_404(
@@ -140,10 +139,10 @@ class CategoryPostsView(DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         category = self.get_object()
-        posts = get_published_posts(category.posts.all())
         context['category'] = category
         context['page_obj'] = Paginator(
-            posts, self.paginate_by).get_page(
+            get_published_posts(category.posts.all()), ENTRIES_PER_PAGE
+        ).get_page(
             self.request.GET.get('page')
         )
         return context
@@ -160,13 +159,13 @@ class ProfileView(DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         author = get_object_or_404(User, username=self.kwargs['username'])
-        if self.request.user == author:
-            posts = author.posts.all()
-        else:
-            posts = get_published_posts(author.posts)
+        posts = author.posts.annotate(
+            comment_count=Count('comments')
+        ).order_by('-pub_date')
         context['profile'] = author
         context['page_obj'] = Paginator(
-            posts, self.paginate_by).get_page(
+            posts, ENTRIES_PER_PAGE
+        ).get_page(
             self.request.GET.get('page')
         )
 
